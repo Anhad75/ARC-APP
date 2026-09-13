@@ -1,6 +1,6 @@
 {
-  "name": "Field Notes",
-  "short_name": "Field Notes",
+  "name": "ARC-APP-C",
+  "short_name": "ARC-APP-C",
   "description": "Offline archaeological field records and GPS pathway tracking.",
   "start_url": "./",
   "display": "standalone",

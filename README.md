@@ -1,4 +1,4 @@
-# Field Notes
+# ARC-APP-C
 
 Frontend-only archaeological field-recording PWA. Accounts, records, GPS paths, settings, and compressed photos are stored on the current device with IndexedDB. No backend or cloud database is required.
 
@@ -45,6 +45,10 @@ Install command: npm install
 ```
 
 For GitHub Pages, configure the Pages source to use GitHub Actions or publish the `dist` directory from a build workflow. The application uses client-side state and does not need server environment variables.
+
+After renaming the GitHub repository to `ARC-APP-C`, the Pages URL is:
+
+`https://anhad75.github.io/ARC-APP-C/`
 
 ## Important limitation
 

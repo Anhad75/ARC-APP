@@ -1,4 +1,4 @@
-name: Deploy Field Notes
+name: Deploy ARC-APP-C
 
 on:
   push:
