@@ -5,22 +5,14 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "auth": "node server.js",
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview"
   },
   "dependencies": {
-    "@auth/core": "^0.41.3",
-    "@auth/express": "^0.12.3",
-    "@auth/mongodb-adapter": "^3.11.3",
     "bcryptjs": "^3.0.3",
-    "cors": "^2.8.6",
     "dexie": "^4.4.6",
-    "dotenv": "^17.4.2",
-    "express": "^4.21.2",
     "leaflet": "^1.9.4",
-    "mongodb": "^6.21.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },

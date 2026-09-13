@@ -2,12 +2,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import "./App.css";
-import { loadLocalPath, loadLocalRecords, loadQueuedMutations, removeQueuedMutation, queueMutation, saveLocalPath, saveLocalRecords } from "./storage.js";
+import { loadLocalPath, loadLocalRecords, removeLocalRecord, saveLocalPath, saveLocalRecord, saveLocalRecords } from "./storage.js";
 
 const STORAGE_KEY = "field-notes-records";
 const PATH_KEY = "field-notes-path";
 const SETTINGS_KEY = "field-notes-settings";
-const API_URL = import.meta.env.VITE_AUTH_URL || "";
 const materials = ["Pottery", "Bone", "Beads", "Lithics", "Metal", "Charcoal"];
 const burialTypes = ["Pit", "Cist", "Urn", "Cairn", "Sarcophagus", "Extended"];
 const conditions = [
@@ -147,39 +146,6 @@ function App({ user, onSignOut }) {
   const [notice, setNotice] = useState("Ready for field capture");
   const [settings, setSettings] = useState(() => JSON.parse(localStorage.getItem(SETTINGS_KEY) || "null") || { fontSize: "medium", font: "trebuchet", theme: "light" });
   const watchId = useRef(null);
-  const syncInProgress = useRef(false);
-
-  async function syncQueuedChanges() {
-    if (!navigator.onLine || syncInProgress.current) return;
-    syncInProgress.current = true;
-    try {
-      const mutations = await loadQueuedMutations();
-      for (const mutation of mutations) {
-        const endpoint = mutation.kind === "delete"
-          ? `${API_URL}/api/records/${encodeURIComponent(mutation.recordId)}`
-          : mutation.kind === "update"
-            ? `${API_URL}/api/records/${encodeURIComponent(mutation.recordId)}`
-            : `${API_URL}/api/records`;
-        const response = await fetch(endpoint, {
-          method: mutation.kind === "delete" ? "DELETE" : mutation.kind === "update" ? "PUT" : "POST",
-          headers: mutation.kind === "delete" ? undefined : { "Content-Type": "application/json" },
-          credentials: "include",
-          body: mutation.kind === "delete" ? undefined : JSON.stringify(mutation.payload),
-        });
-        if (!response.ok) throw new Error("Sync request failed");
-        await removeQueuedMutation(mutation.sequence);
-      }
-      if (mutations.length) {
-        const response = await fetch(`${API_URL}/api/records`, { credentials: "include" });
-        if (response.ok) setRecords(await response.json());
-        setNotice("Offline changes synced to the cloud");
-      }
-    } catch {
-      setNotice("Some offline changes are waiting for the next connection");
-    } finally {
-      syncInProgress.current = false;
-    }
-  }
 
   useEffect(() => {
     let active = true;
@@ -209,26 +175,13 @@ function App({ user, onSignOut }) {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
   }, [settings]);
   useEffect(() => {
-    if (!storageReady) return;
-    async function loadCloudRecords() {
-      await syncQueuedChanges();
-      const queued = await loadQueuedMutations();
-      if (queued.length) return;
-      const response = await fetch(`${API_URL}/api/records`, { credentials: "include" });
-      if (!response.ok) throw new Error("Records could not be loaded");
-      setRecords(await response.json());
-    }
-    loadCloudRecords().catch(() => setNotice("Cloud records unavailable - local records remain available"));
-  }, [storageReady]);
-  useEffect(() => {
     const onlineHandler = () => {
       setOnline(true);
-      setNotice("Connection restored - local queue ready to sync");
-      syncQueuedChanges();
+      setNotice("Connection restored - records remain on this device");
     };
     const offlineHandler = () => {
       setOnline(false);
-      setNotice("Offline mode - records stay safely on this device");
+      setNotice("Offline mode - records stay on this device");
     };
     window.addEventListener("online", onlineHandler);
     window.addEventListener("offline", offlineHandler);
@@ -248,7 +201,6 @@ function App({ user, onSignOut }) {
       ),
     [records, search],
   );
-  const syncedCount = records.filter((record) => record.synced).length;
   function updateForm(event) {
     setForm({ ...form, [event.target.name]: event.target.value });
   }
@@ -411,20 +363,9 @@ function App({ user, onSignOut }) {
   }
   async function deleteRecord(record) {
     if (!window.confirm(`Delete ${record.id}? This cannot be undone.`)) return;
-    let savedOnline = online;
-    if (savedOnline) {
-      try {
-        const response = await fetch(`${API_URL}/api/records/${encodeURIComponent(record.id)}`, { method: "DELETE", credentials: "include" });
-        if (!response.ok) { setNotice("Record could not be deleted from the database"); return; }
-      } catch {
-        savedOnline = false;
-      }
-    }
-    if (!savedOnline) {
-      await queueMutation("delete", record.id);
-    }
+    await removeLocalRecord(record.id);
     setRecords((current) => current.filter((item) => item.id !== record.id));
-    setNotice(savedOnline ? `${record.id} deleted` : `${record.id} removed locally and queued for sync`);
+    setNotice(`${record.id} deleted from this device`);
   }
   async function saveRecord(event) {
     event.preventDefault();
@@ -438,22 +379,9 @@ function App({ user, onSignOut }) {
       latitude: Number(form.latitude),
       longitude: Number(form.longitude),
       elevation: Number(form.elevation),
-      synced: online,
+      synced: true,
     };
-    let savedOnline = online;
-    if (savedOnline) {
-      const endpoint = editingId ? `${API_URL}/api/records/${encodeURIComponent(editingId)}` : `${API_URL}/api/records`;
-      try {
-        const response = await fetch(endpoint, { method: editingId ? "PUT" : "POST", headers: { "Content-Type": "application/json" }, credentials: "include", body: JSON.stringify(savedRecord) });
-        if (!response.ok) { setNotice("Record could not be saved to the database"); return; }
-      } catch {
-        savedOnline = false;
-        savedRecord.synced = false;
-      }
-    }
-    if (!savedOnline) {
-      await queueMutation(editingId ? "update" : "create", editingId || savedRecord.id, savedRecord);
-    }
+    await saveLocalRecord(savedRecord);
     setRecords((current) => editingId ? current.map((record) => record.id === editingId ? savedRecord : record) : [savedRecord, ...current]);
     setForm({
       ...emptyForm,
@@ -463,10 +391,8 @@ function App({ user, onSignOut }) {
     setShowForm(false);
     setNotice(
       editingId
-        ? savedOnline ? `${savedRecord.id} updated` : `${savedRecord.id} updated locally and queued for sync`
-        : savedOnline
-          ? "Record saved and marked for cloud sync"
-          : "Record saved to offline queue",
+        ? `${savedRecord.id} updated on this device`
+        : "Record saved on this device",
     );
   }
   function download(filename, content, type) {
@@ -576,11 +502,9 @@ function App({ user, onSignOut }) {
               className={online ? "status-dot online" : "status-dot"}
             ></span>
             <div>
-              <strong>{online ? "Online" : "Offline mode"}</strong>
+              <strong>On-device storage</strong>
               <small>
-                {online
-                  ? `${syncedCount} records synced`
-                  : "Local capture enabled"}
+                {records.length} records saved locally
               </small>
             </div>
           </div>
@@ -607,7 +531,7 @@ function App({ user, onSignOut }) {
           </div>
           <div className="top-actions">
             <span className="last-sync">
-              <span className="status-dot online"></span> Last sync 08:42
+              <span className="status-dot online"></span> Saved locally
             </span>
             <button className="icon-btn" aria-label="Notifications">
               ♢<i></i>
@@ -649,12 +573,12 @@ function App({ user, onSignOut }) {
                 <span className="stat-icon blue">⌁</span>
               </div>
               <div className="stat-card">
-                <span className="stat-label">LOCAL QUEUE</span>
+                <span className="stat-label">DEVICE STORAGE</span>
                 <strong>
-                  {records.filter((record) => !record.synced).length || 0}
+                  {records.length}
                 </strong>
                 <small>
-                  <b className="ochre-text">Waiting</b> for network sync
+                  <b className="green-text">Saved</b> on this device
                 </small>
                 <span className="stat-icon coral">↥</span>
               </div>
@@ -849,8 +773,8 @@ function App({ user, onSignOut }) {
                     <i></i>
                     {record.condition}
                   </span>
-                  <span className={record.synced ? "synced" : "queued"}>
-                    {record.synced ? "Synced" : "Queued"}
+                  <span className="synced">
+                    On device
                   </span>
                   <div className="record-actions">
                     <button className="row-action" onClick={() => openEditForm(record)}>Edit</button>
@@ -872,7 +796,7 @@ function App({ user, onSignOut }) {
         ) : (
           <section className="settings-view">
             <div className="panel settings-panel"><span className="section-kicker">APPEARANCE</span><h2>Workspace settings</h2><label>Font size<select value={settings.fontSize} onChange={(event) => setSettings({ ...settings, fontSize: event.target.value })}><option value="small">Small</option><option value="medium">Medium</option><option value="large">Large</option></select></label><label>Font format<select value={settings.font} onChange={(event) => setSettings({ ...settings, font: event.target.value })}><option value="trebuchet">Trebuchet</option><option value="georgia">Georgia</option><option value="verdana">Verdana</option></select></label><label>Theme<select value={settings.theme} onChange={(event) => setSettings({ ...settings, theme: event.target.value })}><option value="light">Light</option><option value="dusk">Dusk</option><option value="contrast">High contrast</option></select></label></div>
-            <div className="panel settings-panel"><span className="section-kicker">ACCOUNT</span><h2>{user?.name || user?.phone}</h2><p className="helper-text">Records are stored in MongoDB under your signed-in mobile account.</p><button type="button" className="secondary-button" onClick={onSignOut}>Log out</button></div>
+            <div className="panel settings-panel"><span className="section-kicker">ACCOUNT</span><h2>{user?.name || user?.phone}</h2><p className="helper-text">Records and account data are stored locally on this device.</p><button type="button" className="secondary-button" onClick={onSignOut}>Log out</button></div>
           </section>
         )}
       </main>
@@ -1089,7 +1013,7 @@ function App({ user, onSignOut }) {
             <div className="form-footer">
               <span>
                 <i className={online ? "status-dot online" : "status-dot"}></i>
-                {online ? "Will sync when saved" : "Will save to offline queue"}
+                "Saved to this device"
               </span>
               <div>
                 <button
