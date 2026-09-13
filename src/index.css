@@ -1,0 +1,4 @@
+:root { font: 16px/1.45 'Trebuchet MS', 'Segoe UI', sans-serif; color: #31362f; background: #f4f1e8; font-synthesis: none; text-rendering: optimizeLegibility; -webkit-font-smoothing: antialiased; }
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 320px; }
+#root { min-height: 100vh; }
